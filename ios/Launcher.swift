@@ -101,7 +101,12 @@ struct GameFile: Identifiable {
     let id: String
     let name: String
     var optional = false
-    var present: Bool { FileManager.default.fileExists(atPath: docsURL.appendingPathComponent(name).path) }
+    var present: Bool {
+        let path = docsURL.appendingPathComponent(name).path
+        var dir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &dir) else { return false }
+        return !dir.boolValue || !((try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []).isEmpty
+    }
 
     func status(_ found: Bool) -> String {
         guard found else { return optional ? "none" : "missing" }
@@ -134,7 +139,7 @@ let gameFiles = [
     GameFile(id: "Update", name: "upd4-0-1.nsp"),
     GameFile(id: "Booster Course Pass", name: "dlc.nsp", optional: true),
     GameFile(id: "Console Keys", name: "prod.keys"),
-    GameFile(id: "Firmware", name: "Firmware", optional: true),
+    GameFile(id: "Firmware", name: "Firmware"),
 ]
 
 final class Files: ObservableObject {
@@ -181,6 +186,7 @@ final class Files: ObservableObject {
     static func target(for url: URL) -> String {
         let n = url.lastPathComponent.lowercased()
         if n.hasSuffix(".keys") { return "prod.keys" }
+        if url.hasDirectoryPath { return "Firmware" }
         if n.hasSuffix(".nsp") {
             switch nspKind(url) {
             case "base": return "base.nsp"
@@ -338,7 +344,7 @@ struct LauncherView: View {
                 Button("Import game files") { picking = true }
                     .controlSize(.large)
                     .buttonStyle(.borderedProminent)
-                Text("Import prod.keys, the base game and update .nsp files (+DLC/Firmware)/put them in On My iPhone")
+                Text("Import prod.keys, the base game and update .nsp files and the Firmware folder (+DLC)/put them in On My iPhone")
                     .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             if let e = files.error { Text(e).foregroundStyle(.red).font(.callout).multilineTextAlignment(.center) }

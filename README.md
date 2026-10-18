@@ -14,7 +14,8 @@ Because Nintendo ninjas are always watching, you will need your own dump :
 - `prod.keys`
 - the base game (`.nsp`)
 - update 4.0.1 (`.nsp`)
-- optionally, the Booster Course Pass (`.nsp`) and a `Firmware` folder (fonts, Miis)
+- a `Firmware` folder dumped from your Switch (fonts, Miis)
+- optionally, the Booster Course Pass (`.nsp`)
 
 Mush8 will then asks for them : on macOS pick the folder holding them in the launcher, on iOS import them from the app (or copy them in Files → On My iPhone → Mush8). File names don't matter
 
