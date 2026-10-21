@@ -109,8 +109,37 @@ impl Drop for SystemSink {
     }
 }
 
+#[repr(C)]
+struct Timebase {
+    numer: u32,
+    denom: u32,
+}
+
+unsafe extern "C" {
+    fn mach_timebase_info(info: *mut Timebase) -> i32;
+}
+
+fn realtime(period: Duration) {
+    let mut tb = Timebase { numer: 0, denom: 0 };
+    unsafe { mach_timebase_info(&mut tb) };
+    let ticks = |d: Duration| (d.as_nanos() as u64 * tb.denom as u64 / tb.numer.max(1) as u64) as u32;
+    let mut policy = libc::thread_time_constraint_policy { period: ticks(period), computation: ticks(period / 4), constraint: ticks(period), preemptible: 1 };
+    let status = unsafe {
+        libc::thread_policy_set(
+            libc::pthread_mach_thread_np(libc::pthread_self()),
+            libc::THREAD_TIME_CONSTRAINT_POLICY as u32,
+            (&raw mut policy).cast(),
+            libc::THREAD_TIME_CONSTRAINT_POLICY_COUNT,
+        )
+    };
+    if status != 0 {
+        eprintln!("[audio] feeder stays non-realtime ({status})");
+        unsafe { libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE, 0) };
+    }
+}
+
 fn pump(r: &Renderer, feed: &Mutex<Feed>, rate: u32, lead: f64, stop: &AtomicBool) {
-    unsafe { libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE, 0) };
+    realtime(TICK);
     let block = feed.lock().unwrap().frames();
     let chunk = CHUNK_BLOCKS * block;
     let ahead = (lead * rate as f64) as i64;
