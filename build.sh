@@ -125,6 +125,8 @@ if ! command -v brew >/dev/null; then
   eval "$(/opt/homebrew/bin/brew shellenv)"
 fi
 brew --version | head -1
+command -v cmake >/dev/null || { bold "Installing cmake"; brew install cmake; }
+command -v pkg-config >/dev/null || { bold "Installing pkgconf"; brew install pkgconf; }
 if [ "$PLATFORM" = 2 ]; then
   command -v xcodegen >/dev/null || { bold "Installing xcodegen"; brew install xcodegen; }
 fi
