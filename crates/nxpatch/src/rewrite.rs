@@ -32,6 +32,7 @@ pub struct GamePatch {
 
 const MK8DX_401: &str = "158c0c7399aabd7bf83795c2ef3484c700000000";
 const MK8DX_401_KEYPAGE: u64 = 0x1368000;
+const MK8DX_401_ASPECT_STORES: [u64; 3] = [0x3ccab8, 0x3cd25c, 0x3cd318];
 
 pub const GAME_PATCHES: &[GamePatch] = &[
     GamePatch { module_id: MK8DX_401, site: 0x4d8a04, from: &[0x9400_0038], to: &[0x9400_074E] },
@@ -466,6 +467,16 @@ pub fn rewrite(nso: &nxfs::nso::Nso) -> Result<Output> {
         patches.push(Patch { kind: Kind::Svc, start: i as u64 * 4, end: i as u64 * 4 + 4, tramp, tramp_len: e.pc() - tramp });
     }
 
+    if cx.module_id == MK8DX_401 {
+        for site in MK8DX_401_ASPECT_STORES {
+            let i = site as usize / 4;
+            ensure!(patched[i] == words[i], "camera aspect store at {site:#x} overlaps another rewrite");
+            let tramp = e.pc();
+            emit_aspect_scale(&mut e, keypage, words[i], site + 4).with_context(|| format!("camera aspect store at {site:#x}"))?;
+            patched[i] = asm::b(site, tramp)?;
+        }
+    }
+
     let tramp_end = e.pc();
     let mut image = vec![0u8; tramp_end as usize];
     image[..nso.image.len()].copy_from_slice(&nso.image);
@@ -486,6 +497,25 @@ pub fn rewrite(nso: &nxfs::nso::Nso) -> Result<Output> {
         tramp: (tramp_base, tramp_end),
         patches,
     })
+}
+
+fn emit_aspect_scale(e: &mut Emitter, keypage: u64, store: u32, back: u64) -> Result<()> {
+    ensure!(asm::is_str_s(store) && store & 0x1F == 0 && ![16, 17, SP].contains(&((store >> 5) & 0x1F)), "expected str s0, [xN, #imm], found {store:#010x}");
+    e.emit(asm::stp_pre(16, 17, SP, -32));
+    e.emit(asm::str_q(1, SP, 16));
+    let pc = e.pc();
+    e.emit(asm::adrp(16, pc, keypage)?);
+    e.emit(asm::ldr_s(1, 16, keypage::ASPECT));
+    e.emit(asm::fmov_w_s(17, 1));
+    e.emit(asm::lsl_w(17, 17, 1));
+    e.emit(asm::cbz_w(17, 8));
+    e.emit(asm::fmul_s(0, 0, 1));
+    e.emit(asm::ldr_q(1, SP, 16));
+    e.emit(asm::ldp_post(16, 17, SP, 32));
+    e.emit(store);
+    let pc = e.pc();
+    e.emit(asm::b(pc, back)?);
+    Ok(())
 }
 
 fn emit_region(cx: &Ctx, e: &mut Emitter, need: &[Need], start: usize, end: usize, kind: Kind, keypage: u64) -> Result<Kind> {
@@ -623,4 +653,49 @@ fn emit_jump_table(cx: &Ctx, e: &mut Emitter, sc: &Scratch, jt: &JumpTable, keyp
         sc.epilogue(e, false, target)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use unicorn_engine::{Arch, Mode, Prot, RegisterARM64 as R, Unicorn};
+
+    #[test]
+    fn aspect_scale_keeps_registers() {
+        let (code, keypage, back, camera) = (0x1000u64, 0x4000u64, 0x2000u64, 0x6000u64);
+        for (factor, expected) in [(1.22f32, 1.5f32 * 1.22), (0.75, 1.5 * 0.75), (0.0, 1.5), (-0.0, 1.5)] {
+            let mut e = Emitter { base: code, words: Vec::new(), fixups: Vec::new(), labels: Vec::new() };
+            emit_aspect_scale(&mut e, keypage, asm::str_s(0, 9, 0xB0), back).unwrap();
+            let bytes: Vec<u8> = e.words.iter().flat_map(|w| w.to_le_bytes()).collect();
+            let mut uc = Unicorn::new(Arch::ARM64, Mode::LITTLE_ENDIAN).unwrap();
+            uc.mem_map(0, 0x10000, Prot::ALL).unwrap();
+            uc.mem_write(code, &bytes).unwrap();
+            uc.mem_write(keypage + keypage::ASPECT as u64, &factor.to_le_bytes()).unwrap();
+            uc.reg_write(R::CPACR_EL1, 3 << 20).unwrap();
+            uc.reg_write(R::SP, 0x9000).unwrap();
+            uc.reg_write(R::X9, camera).unwrap();
+            uc.reg_write(R::X16, 0x1616).unwrap();
+            uc.reg_write(R::X17, 0x1717).unwrap();
+            uc.reg_write(R::NZCV, 0x6000_0000).unwrap();
+            uc.reg_write(R::S0, 1.5f32.to_bits() as u64).unwrap();
+            uc.reg_write_long(R::Q1, &[0x5A; 16]).unwrap();
+            uc.emu_start(code, back, 0, 64).unwrap();
+            let mut stored = [0u8; 4];
+            uc.mem_read(camera + 0xB0, &mut stored).unwrap();
+            assert_eq!(f32::from_le_bytes(stored), expected);
+            assert_eq!(uc.reg_read(R::PC).unwrap(), back);
+            assert_eq!(uc.reg_read(R::SP).unwrap(), 0x9000);
+            assert_eq!((uc.reg_read(R::X16).unwrap(), uc.reg_read(R::X17).unwrap()), (0x1616, 0x1717));
+            assert_eq!(uc.reg_read(R::NZCV).unwrap(), 0x6000_0000);
+            assert_eq!(&*uc.reg_read_long(R::Q1).unwrap(), &[0x5A; 16]);
+        }
+    }
+
+    #[test]
+    fn aspect_scale_rejects_other_stores() {
+        let mut e = Emitter { base: 0x1000, words: Vec::new(), fixups: Vec::new(), labels: Vec::new() };
+        assert!(emit_aspect_scale(&mut e, 0x4000, asm::str_s(1, 9, 0xB0), 0x2000).is_err());
+        assert!(emit_aspect_scale(&mut e, 0x4000, asm::str_s(0, 16, 0xB0), 0x2000).is_err());
+        assert!(emit_aspect_scale(&mut e, 0x4000, asm::str(0, 9, 0xB0), 0x2000).is_err());
+    }
 }
