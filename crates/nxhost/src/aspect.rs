@@ -114,6 +114,8 @@ struct Rule {
     op: Op,
 }
 
+const CONTENT_FITTED: &[&str] = &["cm_LoadScreen_00", "mn_L_CharaWin_00"];
+
 const STRETCHED_ROOTS: &[&str] = &["rc_RaceView_1P_00", "rc_Viewer_00", "cm_Fade_Pause_00", "cm_Page_Fader", "cm_Page_FaderPause", "mn_L_BlurBG_00"];
 
 const RULES: &[Rule] = &[
@@ -130,19 +132,26 @@ const RULES: &[Rule] = &[
     Rule { layout: "mn_ModeSlct_00", panes: &["N_Capture_00"], op: Op::Cover },
     Rule { layout: "bt_TitleLoading_00", panes: &["N_CheckBG_00"], op: Op::Cover },
     Rule { layout: "cm_LoadWin_00", panes: &["N_All_00"], op: Op::Cover },
-    Rule { layout: "mn_L_BlurBG_00", panes: &["N_All_00"], op: Op::Fill },
 ];
 
 const NOT_BACKDROPS: &[&str] = &["Logo", "Capture", "Movie", "View"];
 const PANELS: &[&str] = &["Blur", "Base", "BG", "Board", "Black", "Mask", "Win", "Partition"];
 
+const FULL: [f32; 2] = [1270.0, 700.0];
+
+fn extent(p: &nxfs::bflyt::Pane, i: usize) -> f32 {
+    p.size[i] * p.scale[i].abs()
+}
+
+fn is_pattern(p: &nxfs::bflyt::Pane) -> bool {
+    &p.kind == b"pic1" && p.name.contains("Ptn")
+}
+
 fn is_backdrop(p: &nxfs::bflyt::Pane, axis: Axis) -> bool {
-    let extent = |i: usize| p.size[i] * p.scale[i].abs();
-    let full = [1270.0, 700.0];
     let i = (axis == Axis::Y) as usize;
-    let screen = (0..2).all(|j| extent(j) >= full[j] && p.translate[j].abs() < 1.0);
+    let screen = (0..2).all(|j| extent(p, j) >= FULL[j] && p.translate[j].abs() < 1.0);
     let panel = (&p.kind == b"wnd1" || PANELS.iter().any(|n| p.name.contains(n)))
-        && (full[i]..=full[i] * 1.06).contains(&extent(i))
+        && (FULL[i]..=FULL[i] * 1.06).contains(&extent(p, i))
         && p.translate[i].abs() < 1.0;
     (&p.kind == b"pic1" || &p.kind == b"wnd1") && (screen || panel) && !NOT_BACKDROPS.iter().any(|n| p.name.contains(n))
 }
@@ -152,6 +161,8 @@ enum Edit {
     Scale(Axis, f32),
     Translate(Axis, f32),
     Shift(Axis, f32),
+    Size(Axis, f32),
+    Tile(Axis, f32),
 }
 
 struct Plan {
@@ -182,9 +193,20 @@ impl Plan {
         let (a, b, s) = (self.axis, self.other(), self.stretch);
         let rules: Vec<&Rule> = RULES.iter().filter(|r| r.layout == name).collect();
         let ruled = |pane: &str| rules.iter().any(|r| r.panes.contains(&pane));
-        let stretched = STRETCHED_ROOTS.contains(&name);
+        let content_fitted = CONTENT_FITTED.contains(&name) || l.panes().iter().any(|p| p.user_data.iter().any(|u| u == "FrameBufferUse") && is_backdrop(p, a));
+        let stretched = STRETCHED_ROOTS.contains(&name) || content_fitted;
         let mut out = Vec::new();
         let mut add = |pane: &str, e: Edit| out.push((pane.to_string(), e));
+        if s != 1.0 && content_fitted {
+            for p in fitted_content(l, a) {
+                add(&p.name, Edit::Scale(a, 1.0 / s));
+                add(&p.name, Edit::Translate(a, 1.0 / s));
+            }
+            let i = (a == Axis::Y) as usize;
+            for p in l.panes().iter().filter(|p| is_pattern(p) && p.translate[i].abs() < 1.0 && extent(p, i) >= FULL[i]) {
+                add(&p.name, Edit::Tile(a, s));
+            }
+        }
         if s != 1.0 && !stretched {
             add("RootPane", Edit::Scale(a, 1.0 / s));
         }
@@ -217,7 +239,10 @@ impl Plan {
         if s != 1.0 && !stretched {
             let leaf = |p: &nxfs::bflyt::Pane| !l.panes().iter().any(|q| l.ancestors(q).next().is_some_and(|a| std::ptr::eq(a, p)));
             for p in l.panes().iter().filter(|p| is_backdrop(p, a) && leaf(p) && !ruled(&p.name) && !l.ancestors(p).any(|q| ruled(&q.name))) {
-                add(&p.name, Edit::Scale(a, s));
+                add(&p.name, Edit::Size(a, s));
+                if is_pattern(p) {
+                    add(&p.name, Edit::Tile(a, s));
+                }
             }
         }
         out
@@ -231,8 +256,32 @@ fn apply(edits: &[(String, Edit)], f: &mut impl PaneEdit) -> bool {
                 Edit::Scale(axis, by) => f.scale(pane, axis, by),
                 Edit::Translate(axis, by) => f.translate(pane, axis, by),
                 Edit::Shift(axis, by) => f.shift(pane, axis, by),
+                Edit::Size(axis, by) => f.resize(pane, axis, by),
+                Edit::Tile(axis, by) => f.tile(pane, axis, by),
             }
     })
+}
+
+fn fitted_content<'l>(l: &'l Layout, axis: Axis) -> Vec<&'l nxfs::bflyt::Pane> {
+    let i = (axis == Axis::Y) as usize;
+    let panes = l.panes();
+    let children = |parent: usize| panes.iter().filter(move |p| p.parent == Some(parent));
+    let index = |p: &nxfs::bflyt::Pane| panes.iter().position(|q| std::ptr::eq(q, p));
+    let mut out = Vec::new();
+    let mut stack: Vec<usize> = panes.iter().position(|p| p.name == "RootPane").into_iter().collect();
+    while let Some(parent) = stack.pop() {
+        for p in children(parent) {
+            let centred = p.translate[i].abs() < 1.0;
+            let group = &p.kind == b"pan1" && centred && p.scale[i] == 1.0;
+            let spans = centred && extent(p, i) >= FULL[i] && !NOT_BACKDROPS.iter().any(|n| p.name.contains(n));
+            if group || spans {
+                stack.extend(index(p));
+            } else {
+                out.push(p);
+            }
+        }
+    }
+    out
 }
 
 static PLAN: LazyLock<Option<Plan>> = LazyLock::new(|| Plan::new(*TARGET, hud_scale(std::env::var("NX_HUD_SCALE").ok().as_deref())));
@@ -420,12 +469,35 @@ mod tests {
         let (s, k) = ((ratio / NATIVE) as f32, 0.8f32);
         let close = |a: [f32; 2], b: [f32; 2]| assert!((a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3, "{a:?} != {b:?}");
         close(l.pane("RootPane").unwrap().scale, [1.0 / s, 1.0]);
-        close(l.pane("P_BG_00").unwrap().scale, [s, 1.0]);
+        close(l.pane("P_BG_00").unwrap().size, [1280.0 * s, 720.0]);
         close(l.pane("P_Logo_00").unwrap().scale, [1.0, 1.0]);
-        close(l.pane("W_Bar_00").unwrap().scale, [s, 1.0]);
+        close(l.pane("W_Bar_00").unwrap().size, [1280.0 * s, 90.0]);
         close(l.pane("P_Icon_00").unwrap().scale, [1.0, 1.0]);
         let hud = l.pane("L_BtTimer_Ml").unwrap();
         close(hud.scale, [k, k]);
         close(hud.translate, [518.0 * s * k + 640.0 * s * (1.0 - k), 305.0 * k + 360.0 * (1.0 - k)]);
+    }
+
+    #[test]
+    fn content_fitted_layouts_keep_full_width_panes() {
+        let mut d = layout(&[
+            (b"pan1", "RootPane", [0.0, 0.0], [1280.0, 720.0]),
+            (b"pic1", "P_FadeBG_00", [0.0, 0.0], [1280.0, 720.0]),
+            (b"pic1", "P_Logo_00", [0.0, 0.0], [1280.0, 720.0]),
+            (b"pan1", "N_Loop_00", [-300.0, 0.0], [30.0, 40.0]),
+        ]);
+        let ratio = 2.17;
+        let plan = Plan::new(Some(Target { ratio, hud_ratio: ratio }), 1.0).unwrap();
+        let l = Layout::parse(&mut d).unwrap();
+        let s = (ratio / NATIVE) as f32;
+        assert_eq!(
+            plan.edits("cm_LoadScreen_00", &l),
+            [
+                ("P_Logo_00".into(), Edit::Scale(Axis::X, 1.0 / s)),
+                ("P_Logo_00".into(), Edit::Translate(Axis::X, 1.0 / s)),
+                ("N_Loop_00".into(), Edit::Scale(Axis::X, 1.0 / s)),
+                ("N_Loop_00".into(), Edit::Translate(Axis::X, 1.0 / s)),
+            ]
+        );
     }
 }
