@@ -91,6 +91,10 @@ impl PaneEdit for Animation<'_> {
     fn shift(&mut self, pane: &str, axis: Axis, by: f32) -> bool {
         self.update(pane, if axis == Axis::X { 0 } else { 1 }, |v| v + by, |v| v)
     }
+
+    fn resize(&mut self, pane: &str, axis: Axis, by: f32) -> bool {
+        self.update(pane, if axis == Axis::X { 8 } else { 9 }, |v| v * by, |v| v * by)
+    }
 }
 
 #[cfg(test)]
