@@ -111,6 +111,7 @@ struct Replay<'a> {
     cb: Retained<gfx::CommandBuffer>,
     pass: Option<Pass>,
     heap: Option<&'static gfx::HeapBuffer>,
+    passes: u32,
 }
 
 impl Replay<'_> {
@@ -326,6 +327,12 @@ impl Replay<'_> {
                     }
                 }
             }
+            self.passes += 1;
+            if self.passes % PASSES_PER_COMMIT == 0 {
+                if let Some(next) = gfx::gpu().queue.0.commandBuffer() {
+                    commit(&std::mem::replace::<Retained<gfx::CommandBuffer>>(&mut self.cb, next));
+                }
+            }
         }
     }
 
@@ -502,7 +509,7 @@ pub fn submit(handles: &[u64]) {
         e.bank_ok = [false; 3];
         e.textures.frame += 1;
         let Some(cb) = gfx::gpu().queue.0.commandBuffer() else { return };
-        let mut r = Replay { e: &mut e, cb, pass: None, heap: None };
+        let mut r = Replay { e: &mut e, cb, pass: None, heap: None, passes: 0 };
         let mut updated = BTreeMap::new();
         for h in handles {
             if let Some(cmds) = cmd::recording(*h) {
@@ -545,7 +552,7 @@ pub fn submit(handles: &[u64]) {
             unsafe { std::ptr::copy_nonoverlapping(ptr as *const u8, addr as *mut u8, size as usize) };
         }
         let cb = r.cb;
-        cb.commit();
+        commit(&cb);
         static DUMPED_AT: AtomicBool = AtomicBool::new(false);
         let dump_at = dbg.dump_rt_at.is_some_and(|t| T0.elapsed().as_secs_f32() >= t) && !DUMPED_AT.swap(true, Relaxed);
         if DUMP_NEXT.swap(false, Relaxed) || dump_at || dbg.dump_frames.contains(&n) {
@@ -606,10 +613,29 @@ pub fn sync_wait(sync: u64) -> u64 {
     }
 }
 
+const PASSES_PER_COMMIT: u32 = 24;
+
+fn commit(cb: &gfx::CommandBuffer) {
+    if *FPS {
+        let h = block2::RcBlock::new(|cb: std::ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
+            let cb = unsafe { cb.as_ref() };
+            static LAST_END: Mutex<f64> = Mutex::new(0.0);
+            let (start, end) = (cb.GPUStartTime(), cb.GPUEndTime());
+            let mut last = LAST_END.lock().unwrap();
+            GPU_NS.fetch_add(((end - start.max(*last)).max(0.0) * 1e9) as u64, Relaxed);
+            *last = last.max(end);
+        });
+        unsafe { cb.addCompletedHandler(block2::RcBlock::as_ptr(&h)) };
+    }
+    cb.commit();
+}
+
+static FPS: LazyLock<bool> = LazyLock::new(|| std::env::var_os("NX_FPS").is_some());
+static GPU_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 fn count_fps() {
-    static ON: LazyLock<bool> = LazyLock::new(|| std::env::var_os("NX_FPS").is_some());
     static STATS: Mutex<Option<(std::time::Instant, std::time::Instant, u32, f32)>> = Mutex::new(None);
-    if !*ON {
+    if !*FPS {
         return;
     }
     let now = std::time::Instant::now();
@@ -619,7 +645,8 @@ fn count_fps() {
     *last = now;
     *n += 1;
     if now.duration_since(*start).as_secs() >= 1 {
-        eprintln!("[fps] {:.1} fps, worst frame {worst:.1} ms", *n as f32 / now.duration_since(*start).as_secs_f32());
+        let gpu = GPU_NS.swap(0, Relaxed) as f32 / 1e6 / *n as f32;
+        eprintln!("[fps] {:.1} fps, worst frame {worst:.1} ms, GPU {gpu:.1} ms/frame", *n as f32 / now.duration_since(*start).as_secs_f32());
         *s = Some((now, now, 0, 0.0));
     }
 }
@@ -755,8 +782,7 @@ fn dump_at(t: &Shared<gfx::Texture>) {
         v.sort_by(|a, b| b.partial_cmp(a).unwrap());
         Mutex::new(v)
     });
-    static START: LazyLock<std::time::Instant> = LazyLock::new(std::time::Instant::now);
-    let now = START.elapsed().as_secs_f32();
+    let now = gfx::clock();
     let mut times = TIMES.lock().unwrap();
     if times.last().is_some_and(|&at| now >= at) {
         let at = times.pop().unwrap();

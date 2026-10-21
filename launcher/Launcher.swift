@@ -66,6 +66,8 @@ final class Settings: ObservableObject {
     @Published var motion = false
     @Published var phonePads = true
     @Published var handheld = false
+    @Published var uhd = false
+    @Published var split60 = true
     private var autosave: AnyCancellable?
 
     init() {
@@ -89,6 +91,8 @@ final class Settings: ObservableObject {
         motion = j["motion_controls"] as? Bool ?? false
         phonePads = j["phone_pads"] as? Bool ?? true
         handheld = j["handheld"] as? Bool ?? false
+        uhd = j["uhd"] as? Bool ?? false
+        split60 = j["split60"] as? Bool ?? true
     }
 
     var folderURL: URL { URL(fileURLWithPath: folder) }
@@ -98,7 +102,7 @@ final class Settings: ObservableObject {
             "folder": folder, "keys": keys, "base": base, "update": update, "dlc": dlc, "network": network,
             "lan_interface": lanInterface, "lanplay_server": lanPlayServer, "pipeline_archive": pipelineArchive,
             "prewarm_pipelines": prewarm, "rumble": rumble, "background_compile": backgroundCompile, "motion_controls": motion,
-            "handheld": handheld, "phone_pads": phonePads,
+            "handheld": handheld, "uhd": uhd, "split60": split60, "phone_pads": phonePads,
         ]
         try? FileManager.default.createDirectory(at: supportURL, withIntermediateDirectories: true)
         if let data = try? JSONSerialization.data(withJSONObject: j, options: [.prettyPrinted, .sortedKeys]) {
@@ -124,7 +128,8 @@ final class Settings: ObservableObject {
         if !backgroundCompile { env["NX_SYNC_SHADERS"] = "1" }
         env["NX_MOTION"] = motion ? "1" : "0"
         env["NX_PHONE_PADS"] = phonePads ? "1" : "0"
-        if handheld { env["NX_HANDHELD"] = "1" }
+        if handheld { env["NX_HANDHELD"] = "1" } else if uhd { env["NX_4K"] = "1" }
+        if split60 { env["NX_SPLIT60"] = "1" }
         return env
     }
 
@@ -358,10 +363,13 @@ struct LauncherView: View {
 
     var settingsSection: some View {
         Section("Settings") {
-            Picker("Console mode", selection: $s.handheld) {
-                Text("Docked (1080p)").tag(false)
-                Text("Handheld (720p)").tag(true)
+            Picker("Console mode", selection: Binding(get: { s.handheld ? 2 : s.uhd ? 1 : 0 }, set: { s.handheld = $0 == 2; s.uhd = $0 == 1 })) {
+                Text("Docked (1080p)").tag(0)
+                Text("Docked (4K)").tag(1)
+                Text("Handheld (720p)").tag(2)
             }
+            Toggle("60 fps split screen", isOn: $s.split60)
+            caption("3 or 4 players get every screen drawn each frame, needs a fast GPU")
             Picker("Multiplayer", selection: $s.network) {
                 Text("Off").tag("off")
                 Text("LAN").tag("lan")

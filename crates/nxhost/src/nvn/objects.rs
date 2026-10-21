@@ -64,6 +64,17 @@ pub struct State {
 }
 
 const TEXTURE_MAGIC: u64 = 0x5845_5458_4E56_4E58;
+const BUFFER_MAGIC: u64 = 0x5246_4642_4E56_4E58;
+
+fn buffer(s: &State, obj: u64) -> Option<Buffer> {
+    if let Some(b) = s.buffers.get(&obj) {
+        return Some(*b);
+    }
+    if obj == 0 || rd::<u64>(obj) != BUFFER_MAGIC {
+        return None;
+    }
+    Some(Buffer { pool: rd(obj + 8), offset: rd(obj + 0x10), size: rd(obj + 0x18) })
+}
 
 pub fn texture(obj: u64) -> Option<Texture> {
     if obj == 0 || rd::<u64>(obj) != TEXTURE_MAGIC {
@@ -215,7 +226,15 @@ pub fn host_impl(name: &str) -> Option<HostFn> {
 
         "nvnBufferInitialize" => |a| {
             let b = a.0[1];
-            state().buffers.insert(a.0[0], Buffer { pool: rd(b + 8), offset: rd(b + 0x10), size: rd(b + 0x18) });
+            let buf = Buffer { pool: rd(b + 8), offset: rd(b + 0x10), size: rd(b + 0x18) };
+            unsafe {
+                let o = a.0[0] as *mut u64;
+                o.write_unaligned(BUFFER_MAGIC);
+                o.add(1).write_unaligned(buf.pool);
+                o.add(2).write_unaligned(buf.offset);
+                o.add(3).write_unaligned(buf.size);
+            }
+            state().buffers.insert(a.0[0], buf);
             1
         },
         "nvnBufferFinalize" => |a| {
@@ -224,9 +243,17 @@ pub fn host_impl(name: &str) -> Option<HostFn> {
         },
         "nvnBufferGetAddress" | "nvnBufferMap" => |a| {
             let s = state();
-            s.buffers.get(&a.0[0]).and_then(|b| s.pools.get(&b.pool).map(|p| p.cpu + b.offset)).unwrap_or(0)
+            let addr = buffer(&s, a.0[0]).and_then(|b| s.pools.get(&b.pool).map(|p| p.cpu + b.offset));
+            if addr.is_none() {
+                static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+                if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    let lr = unsafe { *(a as *const _ as *const u64).sub(1) };
+                    eprintln!("[nvn] buffer {:#x} has no address (asked at {})", a.0[0], crate::diag::symbolize(lr));
+                }
+            }
+            addr.unwrap_or(0)
         },
-        "nvnBufferGetSize" => |a| state().buffers.get(&a.0[0]).map_or(0, |b| b.size),
+        "nvnBufferGetSize" => |a| buffer(&state(), a.0[0]).map_or(0, |b| b.size),
         "nvnBufferFlushMappedRange" | "nvnBufferInvalidateMappedRange" | "nvnBufferSetDebugLabel" => |_| 0,
 
         "nvnTextureInitialize" => |a| {
