@@ -36,7 +36,7 @@ final class Settings: ObservableObject {
     @Published var motion = false
     @Published var handheld = true
     @Published var phonePads = false
-    @Published var fillScreen = false
+    @Published var fillScreen = true
     @Published var hudAtEdges = true
     @Published var hudScale = 1.0
     var extra: [String: Any] = [:]
@@ -57,7 +57,7 @@ final class Settings: ObservableObject {
         motion = json["motion_controls"] as? Bool ?? false
         handheld = json["handheld"] as? Bool ?? true
         phonePads = json["phone_pads"] as? Bool ?? false
-        fillScreen = json["aspect"] as? String == "fill"
+        fillScreen = json["aspect"] as? String != "16:9"
         hudAtEdges = json["hud"] as? String != "center"
         hudScale = json["hud_scale"] as? Double ?? 1.0
     }

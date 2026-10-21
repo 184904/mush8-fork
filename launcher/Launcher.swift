@@ -68,7 +68,7 @@ final class Settings: ObservableObject {
     @Published var handheld = false
     @Published var uhd = false
     @Published var split60 = true
-    @Published var fillScreen = false
+    @Published var fillScreen = true
     @Published var hudAtEdges = true
     @Published var hudScale = 1.0
     private var autosave: AnyCancellable?
@@ -96,7 +96,7 @@ final class Settings: ObservableObject {
         handheld = j["handheld"] as? Bool ?? false
         uhd = j["uhd"] as? Bool ?? false
         split60 = j["split60"] as? Bool ?? true
-        fillScreen = j["aspect"] as? String == "fill"
+        fillScreen = j["aspect"] as? String != "16:9"
         hudAtEdges = j["hud"] as? String != "center"
         hudScale = j["hud_scale"] as? Double ?? 1.0
     }

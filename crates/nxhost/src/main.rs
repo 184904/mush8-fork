@@ -204,7 +204,7 @@ fn apply_launcher_settings() {
     if field("phone_pads").as_deref() == Some("true") {
         unsafe { std::env::set_var("NX_PHONE_PADS", "1") };
     }
-    if field("aspect").as_deref() == Some("fill") {
+    if field("aspect").as_deref() != Some("16:9") {
         unsafe { std::env::set_var("NX_ASPECT", "auto") };
     }
     if field("hud").as_deref() == Some("center") {
