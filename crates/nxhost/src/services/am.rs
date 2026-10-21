@@ -327,12 +327,18 @@ fn controller_applet(input: &[Vec<u8>]) -> Option<Vec<u8>> {
     let arg = input.get(2);
     let min = arg.and_then(|a| a.first()).map_or(1, |&v| (v as i8).max(1)) as usize;
     let max = arg.and_then(|a| a.get(1)).map_or(4, |&v| (v as i8).clamp(1, 8)) as usize;
+    crate::input::FILL_TO.store(0, Relaxed);
     let Some(connected) = crate::kernel::blocking(|| crate::gfx::overlay::controller_screen(min, max)) else {
         eprintln!("[am] controller applet: canceled");
         return None;
     };
     let players = connected.clamp(min, max.max(min));
     eprintln!("[am] controller applet: {connected} controllers connected, the game asks {min}..={max} players: {players}");
+    if connected < players {
+        eprintln!("[am] controller applet: players {}..={players} copy player 1", connected + 1);
+        crate::input::FILL_TO.store(players, Relaxed);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
     let mut out = vec![0u8; 0xC];
     out[0] = players as u8;
     out[4..8].copy_from_slice(&0u32.to_le_bytes());

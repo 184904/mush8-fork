@@ -364,6 +364,13 @@ impl Replay<'_> {
                     let itype = if t == 1 { MTLIndexType::UInt16 } else { MTLIndexType::UInt32 };
                     return Ok(Prim::Indexed { ty, itype, buffer: h.buffer.clone(), offset: (addr - h.base) as usize, count: d.count as usize, base_vertex: d.base_vertex });
                 }
+                if !crate::kernel::aspace().readable(addr, size * d.count as u64) {
+                    static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+                    if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        eprintln!("[gfx] draw skipped: its {} indices at {addr:#x} are outside guest memory", d.count);
+                    }
+                    return Err("index buffer outside guest memory");
+                }
                 let src = read_indices(t, addr, d.count);
                 let v = match conv {
                     Some(f) => f(&src),

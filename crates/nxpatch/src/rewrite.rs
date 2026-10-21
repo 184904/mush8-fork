@@ -119,6 +119,43 @@ pub const GAME_PATCHES: &[GamePatch] = &[
     },
     GamePatch { module_id: MK8DX_401, site: 0xb52a74, from: &[0xD503_201F, 0xD503_201F], to: &[0x305F_6E4F, 0x0000_0032] },
     GamePatch { module_id: MK8DX_401, site: 0x546a80, from: &[0x3400_23C8], to: &[0x1400_011E] },
+    GamePatch { module_id: MK8DX_401, site: 0x87de00, from: &[0xB219_0FE0, 0xF2C0_8700, 0xD65F_03C0], to: &[0xF000_5740, 0xF940_1000, 0xD65F_03C0] },
+    GamePatch {
+        module_id: MK8DX_401,
+        site: 0x3c7354,
+        from: &[0x320B_07E8, 0xF900_23E8, 0x52A0_B008, 0xF900_27E8],
+        to: &[0xB000_7D08, 0xF940_1508, 0x52A0_0C09, 0xA904_23E9],
+    },
+    GamePatch { module_id: MK8DX_401, site: 0x3d6820, from: &[0xB940_0BE8, 0xB940_0BE8, 0x3204_03E8], to: &[0xD000_7C88, 0xB940_3108, 0xD503_201F] },
+    GamePatch { module_id: MK8DX_401, site: 0x7e342c, from: &[0x52B6_0A08, 0x9100_63E0, 0xF900_0FE8], to: &[0xB000_5C28, 0xF940_1D08, 0xF900_0FE8] },
+    GamePatch {
+        module_id: MK8DX_401,
+        site: 0x7e3390,
+        from: &[
+            0xD100_83FF, 0xA901_7BFD, 0x9100_43FD, 0x52B8_3800, 0x940D_C3E0, 0x9100_23E0, 0x3209_07E1, 0x940D_C351, 0xF940_07E0,
+            0x3209_07E1, 0x97F6_7D50, 0xA941_7BFD, 0x9100_83FF, 0xD65F_03C0,
+        ],
+        to: &[
+            0xA9BE_7BFD, 0x9100_03FD, 0xB000_5C20, 0xF940_2000, 0x940D_C3E0, 0x9100_43E0, 0x3209_07E1, 0x940D_C351, 0xF940_0BE0,
+            0x3209_07E1, 0x97F6_7D50, 0xA8C2_7BFD, 0xD65F_03C0, 0xD503_201F,
+        ],
+    },
+    GamePatch {
+        module_id: MK8DX_401,
+        site: 0xafecc8,
+        from: &[
+            0x3940_6008, 0x1100_0508, 0x3900_6008, 0xB940_0808, 0x3400_0308, 0xF940_0809, 0x3940_640A, 0x7100_095F, 0x5400_01A3,
+            0x39D0_252B, 0x3100_057F, 0x5400_0140, 0x3940_600C, 0x1ACA_098D, 0x1B0A_B1AA, 0x6B0B_015F, 0x5400_00E0, 0xF940_012A,
+            0xB400_00AA, 0x3200_03EA, 0x1400_0004, 0x2A1F_03EA, 0x1400_0002, 0x321F_03EA, 0x3910_212A, 0x9110_4129, 0xD100_0508,
+            0xB5FF_FD68, 0xD65F_03C0,
+        ],
+        to: &[
+            0x3940_600C, 0x1100_058C, 0x3900_600C, 0x3940_600C, 0xA940_A408, 0x3400_02E8, 0xD000_434E, 0x3941_21CE, 0x3940_640A,
+            0x6B0E_015F, 0x5400_0163, 0x39D0_252B, 0x37F8_012B, 0x1ACA_098D, 0x1B0A_B1AA, 0x6B0B_015F, 0x5400_00E0, 0xF940_012A,
+            0xB400_00AA, 0x5280_002A, 0x1400_0004, 0x2A1F_03EA, 0x1400_0002, 0x5280_004A, 0x3910_212A, 0x9110_4129, 0x5100_0508,
+            0x35FF_FDA8, 0xD65F_03C0,
+        ],
+    },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

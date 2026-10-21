@@ -35,8 +35,7 @@ fn scripted(player: usize) -> u64 {
             Some((t.parse().ok()?, names.iter().find(|(n, _)| n.eq_ignore_ascii_case(b))?.1, player))
         }).collect()
     });
-    static START: std::sync::LazyLock<std::time::Instant> = std::sync::LazyLock::new(std::time::Instant::now);
-    let t = START.elapsed().as_secs_f32();
+    let t = crate::gfx::clock();
     SCRIPT.iter().filter(|(at, _, p)| *p == player + 1 && t >= *at && t < at + 0.15).fold(0, |m, (_, b, _)| m | b)
 }
 
@@ -139,11 +138,13 @@ pub fn screen_sample() -> Vec<(u32, f32, f32, u32)> {
 }
 
 pub static SLOT_NAMES: std::sync::Mutex<[Option<String>; MAX_PLAYERS]> = std::sync::Mutex::new([const { None }; MAX_PLAYERS]);
+pub static FILL_TO: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 pub struct Pads {
     slots: [Option<objc2::rc::Retained<GCController>>; MAX_PLAYERS],
     phones: [Option<std::net::SocketAddr>; MAX_PLAYERS],
     extra: usize,
+    fill: usize,
     touch_init: bool,
     phone: Phone,
 }
@@ -151,7 +152,7 @@ pub struct Pads {
 impl Pads {
     pub fn new() -> Self {
         let extra = std::env::var("NX_EXTRA_PADS").ok().and_then(|v| v.parse().ok()).unwrap_or(0usize).min(MAX_PLAYERS - 1);
-        Self { slots: Default::default(), phones: Default::default(), extra, touch_init: false, phone: Default::default() }
+        Self { slots: Default::default(), phones: Default::default(), extra, fill: 0, touch_init: false, phone: Default::default() }
     }
 
     pub fn poll(&mut self) -> [Option<PadState>; MAX_PLAYERS] {
@@ -217,6 +218,8 @@ impl Pads {
             if changed {
                 crate::haptics::set_controllers(&self.slots);
             }
+            let fill = FILL_TO.load(std::sync::atomic::Ordering::Relaxed);
+            changed |= std::mem::replace(&mut self.fill, fill) != fill;
             let mut out: [Option<PadState>; MAX_PLAYERS] = Default::default();
             let mut virtual_left = self.extra;
             let phone = &mut self.phone;
@@ -235,11 +238,14 @@ impl Pads {
                         acc.touch();
                     }
                 }
-                let virtual_pad = i > 0 && slot.is_none() && virtual_left > 0;
-                if virtual_pad {
+                let filler = i > 0 && i < fill && slot.is_none() && remote.is_none();
+                let virtual_pad = filler || (i > 0 && slot.is_none() && virtual_left > 0);
+                if virtual_pad && !filler {
                     virtual_left -= 1;
                 }
-                if i == 0 || slot.is_some() || remote.is_some() || virtual_pad {
+                if filler {
+                    out[i] = out[0];
+                } else if i == 0 || slot.is_some() || remote.is_some() || virtual_pad {
                     out[i] = Some(acc.state());
                 }
                 let sample = if !motion_enabled() {
