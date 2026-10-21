@@ -32,6 +32,7 @@ final class Settings: ObservableObject {
     @Published var lanPlayServer = ""
     @Published var prewarm = true
     @Published var rumble = true
+    @Published var spatial = true
     @Published var backgroundCompile = true
     @Published var motion = false
     @Published var handheld = true
@@ -53,6 +54,7 @@ final class Settings: ObservableObject {
         lanPlayServer = json["lanplay_server"] as? String ?? ""
         prewarm = json["prewarm_pipelines"] as? Bool ?? true
         rumble = json["rumble"] as? Bool ?? true
+        spatial = json["spatial_audio"] as? Bool ?? true
         backgroundCompile = json["background_compile"] as? Bool ?? true
         motion = json["motion_controls"] as? Bool ?? false
         handheld = json["handheld"] as? Bool ?? true
@@ -70,6 +72,7 @@ final class Settings: ObservableObject {
         json["extra_pads"] = nil
         json["prewarm_pipelines"] = prewarm
         json["rumble"] = rumble
+        json["spatial_audio"] = spatial
         json["background_compile"] = backgroundCompile
         json["motion"] = nil
         json["motion_controls"] = motion
@@ -274,6 +277,11 @@ struct LauncherView: View {
                     }
                     Toggle("Vibration", isOn: $s.rumble)
                     Toggle("Motion controls", isOn: $s.motion)
+                }
+                Section {
+                    Toggle("Spatial audio", isOn: $s.spatial)
+                } footer: {
+                    Text("Plays the game's 5.1 mix in spatial audio. Choose Fixed or Head Tracked for AirPods in Control Center")
                 }
                 Section {
                     Toggle("iPhone controllers", isOn: $s.phonePads)

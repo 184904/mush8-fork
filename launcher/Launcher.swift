@@ -62,6 +62,7 @@ final class Settings: ObservableObject {
     @Published var pipelineArchive = false
     @Published var prewarm = true
     @Published var rumble = true
+    @Published var spatial = true
     @Published var backgroundCompile = true
     @Published var motion = false
     @Published var phonePads = true
@@ -90,6 +91,7 @@ final class Settings: ObservableObject {
         pipelineArchive = j["pipeline_archive"] as? Bool ?? false
         prewarm = j["prewarm_pipelines"] as? Bool ?? true
         rumble = j["rumble"] as? Bool ?? true
+        spatial = j["spatial_audio"] as? Bool ?? true
         backgroundCompile = j["background_compile"] as? Bool ?? true
         motion = j["motion_controls"] as? Bool ?? false
         phonePads = j["phone_pads"] as? Bool ?? true
@@ -107,7 +109,7 @@ final class Settings: ObservableObject {
         let j: [String: Any] = [
             "folder": folder, "keys": keys, "base": base, "update": update, "dlc": dlc, "network": network,
             "lan_interface": lanInterface, "lanplay_server": lanPlayServer, "pipeline_archive": pipelineArchive,
-            "prewarm_pipelines": prewarm, "rumble": rumble, "background_compile": backgroundCompile, "motion_controls": motion,
+            "prewarm_pipelines": prewarm, "rumble": rumble, "spatial_audio": spatial, "background_compile": backgroundCompile, "motion_controls": motion,
             "handheld": handheld, "uhd": uhd, "split60": split60, "phone_pads": phonePads,
             "aspect": fillScreen ? "fill" : "16:9", "hud": hudAtEdges ? "edges" : "center", "hud_scale": hudScale,
         ]
@@ -132,6 +134,7 @@ final class Settings: ObservableObject {
         if pipelineArchive { env["NX_PIPELINE_ARCHIVE"] = "1" }
         if prewarm { env["NX_PREWARM"] = "1" }
         if !rumble { env["NX_RUMBLE"] = "0" }
+        if !spatial { env["NX_SPATIAL"] = "0" }
         if !backgroundCompile { env["NX_SYNC_SHADERS"] = "1" }
         env["NX_MOTION"] = motion ? "1" : "0"
         env["NX_PHONE_PADS"] = phonePads ? "1" : "0"
@@ -423,6 +426,8 @@ struct LauncherView: View {
             caption("Builds the game's graphics pipelines in the background at startup")
             Toggle("Vibration", isOn: $s.rumble)
             Toggle("Motion controls", isOn: $s.motion)
+            Toggle("Spatial audio", isOn: $s.spatial)
+            caption("Plays the game's 5.1 mix in spatial audio. Choose Fixed or Head Tracked for AirPods in Control Center")
             Toggle("iPhone controllers", isOn: $s.phonePads)
             caption("iPhones on this network join as players with Mush8's \"Use as a controller\"")
         }
