@@ -460,6 +460,7 @@ pub fn present(tex: &Texture, flip: bool) {
     att.setStoreAction(MTLStoreAction::Store);
     if let Some(enc) = cb.renderCommandEncoderWithDescriptor(&desc) {
         let (params, aspect) = present_params(tex, flip);
+        let aspect = aspect * crate::aspect::stretch();
         ASPECT.store(aspect.to_bits(), std::sync::atomic::Ordering::Relaxed);
         enc.setViewport(letterbox(aspect, size.width, size.height));
         enc.setRenderPipelineState(&g.present.0);

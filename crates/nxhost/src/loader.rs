@@ -198,6 +198,7 @@ pub fn load(dir: &Path, names: &[&str], hle: &HashMap<&str, u64>) -> Result<Vec<
                 *((kp + off as u64) as *mut u64) = v;
             }
             *((kp + keypage::SPLIT_DIV as u64) as *mut u8) = split_div;
+            *((kp + keypage::ASPECT as u64) as *mut f32) = crate::aspect::stretch() as f32;
         }
         let text_end = align_up(m.text, PAGE);
         let data_start = align_down(m.data.0, PAGE);

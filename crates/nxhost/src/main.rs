@@ -1,5 +1,6 @@
 // Mush8 - main.rs
 // Constantin Clerc (c22dev) - 0.1
+mod aspect;
 mod audio;
 mod diag;
 mod dnssd;
@@ -111,7 +112,7 @@ struct Args {
 #[cfg(target_os = "macos")]
 fn main() -> Result<()> {
     start(Args::parse())?;
-    gfx::run_app("Mush8", 1280.0, 720.0)
+    gfx::run_app("Mush8", 720.0 * aspect::ratio(), 720.0)
 }
 
 #[cfg(target_os = "ios")]
@@ -203,6 +204,15 @@ fn apply_launcher_settings() {
     if field("phone_pads").as_deref() == Some("true") {
         unsafe { std::env::set_var("NX_PHONE_PADS", "1") };
     }
+    if field("aspect").as_deref() == Some("fill") {
+        unsafe { std::env::set_var("NX_ASPECT", "auto") };
+    }
+    if field("hud").as_deref() == Some("center") {
+        unsafe { std::env::set_var("NX_HUD", "center") };
+    }
+    if let Some(scale) = field("hud_scale") {
+        unsafe { std::env::set_var("NX_HUD_SCALE", scale) };
+    }
 }
 
 fn start(args: Args) -> Result<()> {
@@ -223,6 +233,7 @@ fn start(args: Args) -> Result<()> {
         nvn::precompile(romfs, &modules)?;
         std::process::exit(0);
     }
+    let romfs = aspect::romfs(romfs)?;
     let _ = services::fs::CONFIG.set(services::fs::Config {
         romfs,
         save_dir: args.save.clone(),
