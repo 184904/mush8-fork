@@ -55,13 +55,6 @@ Or make an `.ipa` to install with AltStore / SideStore (no signing needed on the
 ```
 it ends up in `build/Mush8.ipa`
 
-## 4K and 60 fps split screen
-On a Mac, Docked (4K) renders the game natively at 3840×2160 : MK8D stops at 1080p, so Mush8 patches its output size and memory budgets
-
-With 3 or 4 players the game draws each screen every other frame, "60 fps split screen" draws them all every frame (needs a fast GPU)
-
-`tools/race-bench.sh` boots straight into a 4-player race and prints how fast it renders
-
 ## Multiplayer
 Pick a mode in the launcher, under Multiplayer :
 - LAN : players on the same network, a Switch can join too
