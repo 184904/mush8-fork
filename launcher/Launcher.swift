@@ -68,6 +68,9 @@ final class Settings: ObservableObject {
     @Published var handheld = false
     @Published var uhd = false
     @Published var split60 = true
+    @Published var fillScreen = false
+    @Published var hudAtEdges = true
+    @Published var hudScale = 1.0
     private var autosave: AnyCancellable?
 
     init() {
@@ -93,6 +96,9 @@ final class Settings: ObservableObject {
         handheld = j["handheld"] as? Bool ?? false
         uhd = j["uhd"] as? Bool ?? false
         split60 = j["split60"] as? Bool ?? true
+        fillScreen = j["aspect"] as? String == "fill"
+        hudAtEdges = j["hud"] as? String != "center"
+        hudScale = j["hud_scale"] as? Double ?? 1.0
     }
 
     var folderURL: URL { URL(fileURLWithPath: folder) }
@@ -103,6 +109,7 @@ final class Settings: ObservableObject {
             "lan_interface": lanInterface, "lanplay_server": lanPlayServer, "pipeline_archive": pipelineArchive,
             "prewarm_pipelines": prewarm, "rumble": rumble, "background_compile": backgroundCompile, "motion_controls": motion,
             "handheld": handheld, "uhd": uhd, "split60": split60, "phone_pads": phonePads,
+            "aspect": fillScreen ? "fill" : "16:9", "hud": hudAtEdges ? "edges" : "center", "hud_scale": hudScale,
         ]
         try? FileManager.default.createDirectory(at: supportURL, withIntermediateDirectories: true)
         if let data = try? JSONSerialization.data(withJSONObject: j, options: [.prettyPrinted, .sortedKeys]) {
@@ -130,6 +137,9 @@ final class Settings: ObservableObject {
         env["NX_PHONE_PADS"] = phonePads ? "1" : "0"
         if handheld { env["NX_HANDHELD"] = "1" } else if uhd { env["NX_4K"] = "1" }
         if split60 { env["NX_SPLIT60"] = "1" }
+        if fillScreen { env["NX_ASPECT"] = "auto" }
+        if !hudAtEdges { env["NX_HUD"] = "center" }
+        if hudScale != 1 { env["NX_HUD_SCALE"] = String(hudScale) }
         return env
     }
 
@@ -370,6 +380,22 @@ struct LauncherView: View {
             }
             Toggle("60 fps split screen", isOn: $s.split60)
             caption("3 or 4 players get every screen drawn each frame, needs a fast GPU")
+            Picker("Screen", selection: $s.fillScreen) {
+                Text("16:9").tag(false)
+                Text("Fill screen").tag(true)
+            }
+            if s.fillScreen {
+                Picker("HUD", selection: $s.hudAtEdges) {
+                    Text("Screen edges").tag(true)
+                    Text("Centered").tag(false)
+                }
+            }
+            HStack {
+                Text("HUD size")
+                Slider(value: $s.hudScale, in: 0.5...1.5, step: 0.05)
+                Text("\(Int((s.hudScale * 100).rounded())) %").monospacedDigit().foregroundStyle(.secondary)
+            }
+            caption("Fill screen widens the race to the whole display, menus and HUD keep their proportions")
             Picker("Multiplayer", selection: $s.network) {
                 Text("Off").tag("off")
                 Text("LAN").tag("lan")

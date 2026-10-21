@@ -36,6 +36,9 @@ final class Settings: ObservableObject {
     @Published var motion = false
     @Published var handheld = true
     @Published var phonePads = false
+    @Published var fillScreen = false
+    @Published var hudAtEdges = true
+    @Published var hudScale = 1.0
     var extra: [String: Any] = [:]
     private var autosave: AnyCancellable?
 
@@ -54,6 +57,9 @@ final class Settings: ObservableObject {
         motion = json["motion_controls"] as? Bool ?? false
         handheld = json["handheld"] as? Bool ?? true
         phonePads = json["phone_pads"] as? Bool ?? false
+        fillScreen = json["aspect"] as? String == "fill"
+        hudAtEdges = json["hud"] as? String != "center"
+        hudScale = json["hud_scale"] as? Double ?? 1.0
     }
 
     func save() throws {
@@ -69,6 +75,9 @@ final class Settings: ObservableObject {
         json["motion_controls"] = motion
         json["handheld"] = handheld
         json["phone_pads"] = phonePads
+        json["aspect"] = fillScreen ? "fill" : "16:9"
+        json["hud"] = hudAtEdges ? "edges" : "center"
+        json["hud_scale"] = hudScale
         let data = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: configURL)
     }
@@ -278,6 +287,25 @@ struct LauncherView: View {
                     }
                 } footer: {
                     Text("Handheld renders at 720p: lighter on the GPU and battery")
+                }
+                Section {
+                    Picker("Screen", selection: $s.fillScreen) {
+                        Text("16:9").tag(false)
+                        Text("Fill screen").tag(true)
+                    }
+                    if s.fillScreen {
+                        Picker("HUD", selection: $s.hudAtEdges) {
+                            Text("Screen edges").tag(true)
+                            Text("Centered").tag(false)
+                        }
+                    }
+                    HStack {
+                        Text("HUD size")
+                        Slider(value: $s.hudScale, in: 0.5...1.5, step: 0.05)
+                        Text("\(Int((s.hudScale * 100).rounded())) %").monospacedDigit().foregroundStyle(.secondary)
+                    }
+                } footer: {
+                    Text("Fill screen widens the race to the whole display, menus and HUD keep their proportions")
                 }
                 Section {
                     Toggle("Prewarm pipelines", isOn: $s.prewarm)
