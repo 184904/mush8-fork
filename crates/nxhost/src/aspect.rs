@@ -105,6 +105,7 @@ enum Op {
     Fit,
     Fill,
     Cover,
+    Zoom,
     Hud,
 }
 
@@ -129,7 +130,10 @@ const RULES: &[Rule] = &[
     Rule { layout: "rc_RaceView_4P_Ml", panes: &["L_Fade_00"], op: Op::Fill },
     Rule { layout: "mn_Background_00", panes: &["P_Sparkle_00", "P_Monogram_00", "N_TitelePicAll_00"], op: Op::Cover },
     Rule { layout: "mn_TitleScene_00", panes: &["N_Capture_00", "N_Capture_01"], op: Op::Cover },
-    Rule { layout: "mn_ModeSlct_00", panes: &["N_Capture_00"], op: Op::Cover },
+    Rule { layout: "mn_ModeSlct_00", panes: &["N_Capture_00"], op: Op::Zoom },
+    Rule { layout: "mn_WifiModeSlct_00", panes: &["N_Capture_00"], op: Op::Zoom },
+    Rule { layout: "mn_BattleSlct_00", panes: &["N_Capture_00"], op: Op::Zoom },
+    Rule { layout: "mn_GrprClassSlct_00", panes: &["N_Capture_00"], op: Op::Zoom },
     Rule { layout: "bt_TitleLoading_00", panes: &["N_CheckBG_00"], op: Op::Cover },
     Rule { layout: "cm_LoadWin_00", panes: &["N_All_00"], op: Op::Cover },
 ];
@@ -220,6 +224,7 @@ impl Plan {
                         add(&p.name, Edit::Scale(a, s));
                         add(&p.name, Edit::Scale(b, s));
                     }
+                    Op::Zoom => add(&p.name, Edit::Scale(b, s)),
                     Op::Hud => {
                         let root = l.pane("RootPane").map_or([1280.0, 720.0], |r| r.size);
                         for (axis, spread) in [(a, self.edge), (b, 1.0)] {
