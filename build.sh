@@ -155,6 +155,9 @@ if [ "$PLATFORM" = 1 ]; then
   exit 0
 fi
 
+bold "Preparing Metal toolchain"
+xcodebuild -downloadComponent MetalToolchain
+
 bold "Preparing the iOS toolchain"
 rustup toolchain list | grep "^$TOOLCHAIN" >/dev/null || rustup toolchain install "$TOOLCHAIN" --profile minimal
 rustup target list --toolchain "$TOOLCHAIN" --installed | grep '^aarch64-apple-ios$' >/dev/null || rustup target add aarch64-apple-ios --toolchain "$TOOLCHAIN"
