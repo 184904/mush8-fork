@@ -10,7 +10,6 @@ const NO_MESSAGES: u32 = 0x680;
 const NO_DATA_IN_CHANNEL: u32 = 0x2680;
 const NOT_AVAILABLE: u32 = 0x480;
 const APPLET_ERROR: u32 = 0x0E;
-const CONTROLLER_SUPPORT_CANCELED: u32 = 202 | 3101 << 9;
 
 const FOCUS_STATE_CHANGED: u32 = 15;
 const IN_FOCUS: u8 = 1;
@@ -234,7 +233,6 @@ impl Service for LibraryAppletCreator {
                     id,
                     input: Mutex::new(Vec::new()),
                     output: Mutex::new(VecDeque::new()),
-                    result: std::sync::atomic::AtomicU32::new(0),
                     state_event: new_event(false),
                     out_event: new_event(false),
                 }));
@@ -250,7 +248,6 @@ struct LibraryApplet {
     id: u32,
     input: Mutex<Vec<Vec<u8>>>,
     output: Mutex<VecDeque<Vec<u8>>>,
-    result: std::sync::atomic::AtomicU32,
     state_event: u32,
     out_event: u32,
 }
@@ -263,16 +260,10 @@ fn signal(handle: u32) {
 }
 
 impl LibraryApplet {
-    fn run(&self) {
+    fn run(&self, show_controller: impl FnOnce(usize, usize) -> Option<usize>) {
         let input = self.input.lock().unwrap().clone();
         let out = match self.id {
-            APPLET_CONTROLLER => {
-                let out = controller_applet(&input);
-                if out.is_none() {
-                    self.result.store(CONTROLLER_SUPPORT_CANCELED, Relaxed);
-                }
-                out
-            }
+            APPLET_CONTROLLER => Some(controller_applet(&input, show_controller)),
             APPLET_WEB | APPLET_OFFLINE_WEB => Some(web_applet(&input)),
             APPLET_ERROR => {
                 for (i, d) in input.iter().enumerate() {
@@ -303,9 +294,8 @@ impl Service for LibraryApplet {
         match req.cmd {
             0 => rsp.copy_handles.push(self.state_event),
             1 => rsp.data.push(1),
-            10 => self.run(),
-            20 | 25 | 50 | 60 | 150 => {}
-            30 => return self.result.load(Relaxed),
+            10 => self.run(|min, max| crate::kernel::blocking(|| crate::gfx::overlay::controller_screen(min, max))),
+            20 | 25 | 30 | 50 | 60 | 150 => {}
             100 | 103 => {
                 if let Some(d) = req.in_objects.first().and_then(|o| o.storage_bytes()) {
                     self.input.lock().unwrap().push(d);
@@ -323,14 +313,20 @@ impl Service for LibraryApplet {
     }
 }
 
-fn controller_applet(input: &[Vec<u8>]) -> Option<Vec<u8>> {
+fn controller_applet(input: &[Vec<u8>], show_controller: impl FnOnce(usize, usize) -> Option<usize>) -> Vec<u8> {
     let arg = input.get(2);
     let min = arg.and_then(|a| a.first()).map_or(1, |&v| (v as i8).max(1)) as usize;
     let max = arg.and_then(|a| a.get(1)).map_or(4, |&v| (v as i8).clamp(1, 8)) as usize;
-    crate::input::FILL_TO.store(0, Relaxed);
-    let Some(connected) = crate::kernel::blocking(|| crate::gfx::overlay::controller_screen(min, max)) else {
+    let previous_fill = crate::input::FILL_TO.swap(0, Relaxed);
+    // ControllerSupportResultInfo (8 bytes), followed by the applet result.
+    // Cancellation is result 2 in this storage, not an IPC GetResult error:
+    // StartLibraryAppletEasy aborts when the IPC call fails.
+    let mut out = vec![0u8; 0xC];
+    let Some(connected) = show_controller(min, max) else {
         eprintln!("[am] controller applet: canceled");
-        return None;
+        crate::input::FILL_TO.store(previous_fill, Relaxed);
+        out[8..12].copy_from_slice(&2u32.to_le_bytes());
+        return out;
     };
     let players = connected.clamp(min, max.max(min));
     eprintln!("[am] controller applet: {connected} controllers connected, the game asks {min}..={max} players: {players}");
@@ -339,10 +335,9 @@ fn controller_applet(input: &[Vec<u8>]) -> Option<Vec<u8>> {
         crate::input::FILL_TO.store(players, Relaxed);
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    let mut out = vec![0u8; 0xC];
     out[0] = players as u8;
     out[4..8].copy_from_slice(&0u32.to_le_bytes());
-    Some(out)
+    out
 }
 
 const HELP_URL: &str = "https://github.com/c22dev/Mush8";
@@ -369,4 +364,83 @@ fn web_applet(input: &[Vec<u8>]) -> Vec<u8> {
     out[8..8 + n].copy_from_slice(&url.as_bytes()[..n]);
     out[0x1008..0x1010].copy_from_slice(&(n as u64).to_le_bytes());
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static CONTROLLER_TESTS: Mutex<()> = Mutex::new(());
+
+    fn controller() -> LibraryApplet {
+        LibraryApplet {
+            id: APPLET_CONTROLLER,
+            input: Mutex::new(vec![vec![], vec![], vec![2, 4]]),
+            output: Mutex::new(VecDeque::new()),
+            state_event: new_event(false),
+            out_event: new_event(false),
+        }
+    }
+
+    fn output(applet: &LibraryApplet) -> Vec<u8> {
+        let mut rsp = Response::default();
+        assert_eq!(applet.call(&Request { cmd: 101, ..Default::default() }, &mut rsp), 0, "applet must publish its result storage");
+        rsp.objects[0].storage_bytes().unwrap()
+    }
+
+    fn signaled(handle: u32) -> bool {
+        let Some(Obj::ReadableEvent(e)) = KERNEL.lock().get(handle) else { panic!("expected a readable event") };
+        e.signaled.load(Relaxed)
+    }
+
+    #[test]
+    fn controller_cancel_keeps_applet_ipc_successful() {
+        let _serial = CONTROLLER_TESTS.lock().unwrap();
+        let applet = controller();
+        applet.run(|min, max| {
+            assert_eq!((min, max), (2, 4));
+            None
+        });
+        assert_eq!(applet.call(&Request { cmd: 30, ..Default::default() }, &mut Response::default()), 0, "cancel is an applet output, not an IPC failure");
+    }
+
+    #[test]
+    fn controller_cancel_publishes_output_and_signals_completion() {
+        let _serial = CONTROLLER_TESTS.lock().unwrap();
+        let applet = controller();
+        applet.run(|_, _| None);
+        assert_eq!(output(&applet), [0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0]);
+        assert!(signaled(applet.out_event));
+        assert!(signaled(applet.state_event));
+    }
+
+    #[test]
+    fn controller_confirmation_returns_clamped_player_count_and_success() {
+        let _serial = CONTROLLER_TESTS.lock().unwrap();
+        for (connected, players) in [(0, 2), (3, 3), (8, 4)] {
+            let applet = controller();
+            applet.run(|_, _| Some(connected));
+            assert_eq!(output(&applet), [players, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+            assert_eq!(applet.call(&Request { cmd: 30, ..Default::default() }, &mut Response::default()), 0);
+        }
+    }
+    #[test]
+    fn controller_cancel_restores_previous_virtual_players() {
+        let _serial = CONTROLLER_TESTS.lock().unwrap();
+        let original = crate::input::FILL_TO.swap(0, Relaxed);
+        let confirmed = controller();
+        confirmed.input.lock().unwrap()[2] = vec![4, 4];
+        confirmed.run(|_, _| Some(1));
+        assert_eq!(crate::input::FILL_TO.load(Relaxed), 4);
+
+        let canceled = controller();
+        canceled.run(|_, _| {
+            assert_eq!(crate::input::FILL_TO.load(Relaxed), 0, "dialog must count physical controllers");
+            None
+        });
+        assert_eq!(crate::input::FILL_TO.load(Relaxed), 4, "cancel must preserve previously confirmed virtual players");
+        assert_eq!(output(&canceled)[8..12], 2u32.to_le_bytes());
+        crate::input::FILL_TO.store(original, Relaxed);
+    }
+
 }
