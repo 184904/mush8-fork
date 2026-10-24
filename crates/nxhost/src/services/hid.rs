@@ -88,7 +88,11 @@ fn push_generic(lifo: u64, sampling: u64, p: &PadState, attributes: u32) {
     let (tail, e) = lifo_slot(lifo, GENERIC_ENTRY);
     write(e, sampling);
     write(e + 0x08, sampling);
-    write(e + 0x10, p.buttons);
+    // Swap A/B only in the game-facing packet. Native controller dialogs
+    // still read the original buttons through BUTTONS.
+    use crate::input::{A, B};
+    let buttons = (p.buttons & !(A | B)) | ((p.buttons & A) << 1) | ((p.buttons & B) >> 1);
+    write(e + 0x10, buttons);
     write(e + 0x18, p.left.0);
     write(e + 0x1c, p.left.1);
     write(e + 0x20, p.right.0);
@@ -344,5 +348,42 @@ impl Service for AppletResource {
             }
             _ => Stub(self.name()).call(req, rsp),
         }
+    }
+}
+
+
+#[cfg(test)]
+mod button_tests {
+    use super::*;
+    use crate::input::{A, B, X, Y, ZR, PLUS, DOWN};
+
+    fn sample(p: &PadState) -> [u8; GENERIC_ENTRY as usize] {
+        let mut ring = [0u64; (0x20 + LIFO_ENTRIES * GENERIC_ENTRY) as usize / 8];
+        let lifo = ring.as_mut_ptr() as u64;
+        push_generic(lifo, 42, p, ATTR_CONNECTED | ATTR_WIRED);
+        let entry = lifo + 0x20 + read::<u64>(lifo + 0x10) * GENERIC_ENTRY;
+        unsafe { *(entry as *const [u8; GENERIC_ENTRY as usize]) }
+    }
+
+    #[test]
+    fn guest_samples_swap_a_and_b_including_simultaneous_presses() {
+        for (buttons, expected) in [(0, 0), (A, B), (B, A), (A | B, A | B)] {
+            let packet = sample(&PadState { buttons, ..Default::default() });
+            assert_eq!(u64::from_le_bytes(packet[0x10..0x18].try_into().unwrap()), expected);
+        }
+    }
+
+    #[test]
+    fn guest_samples_preserve_other_buttons_sticks_and_attributes() {
+        let others = X | Y | ZR | PLUS | DOWN | (1 << 63);
+        let p = PadState { buttons: A | others, left: (-32767, 12345), right: (222, -333) };
+        let packet = sample(&p);
+        assert_eq!(u64::from_le_bytes(packet[0x10..0x18].try_into().unwrap()), B | others);
+        assert_eq!(i32::from_le_bytes(packet[0x18..0x1c].try_into().unwrap()), p.left.0);
+        assert_eq!(i32::from_le_bytes(packet[0x1c..0x20].try_into().unwrap()), p.left.1);
+        assert_eq!(i32::from_le_bytes(packet[0x20..0x24].try_into().unwrap()), p.right.0);
+        assert_eq!(i32::from_le_bytes(packet[0x24..0x28].try_into().unwrap()), p.right.1);
+        assert_eq!(u32::from_le_bytes(packet[0x28..0x2c].try_into().unwrap()), ATTR_CONNECTED | ATTR_WIRED);
+        assert_eq!(u64::from_le_bytes(packet[0..8].try_into().unwrap()), 42);
     }
 }
